@@ -590,7 +590,7 @@ func (s *DockerNetworkSuite) TestDockerNetworkConnectDisconnect(c *check.C) {
 }
 
 func (s *DockerNetworkSuite) TestDockerNetworkIPAMMultipleNetworks(c *check.C) {
-	testRequires(c, SameHostDaemon)
+	testRequires(c, testEnv.IsLocalDaemon)
 	// test0 bridge network
 	dockerCmd(c, "network", "create", "--subnet=192.168.0.0/16", "test1")
 	assertNwIsAvailable(c, "test1")
@@ -631,7 +631,7 @@ func (s *DockerNetworkSuite) TestDockerNetworkIPAMMultipleNetworks(c *check.C) {
 }
 
 func (s *DockerNetworkSuite) TestDockerNetworkCustomIPAM(c *check.C) {
-	testRequires(c, SameHostDaemon)
+	testRequires(c, testEnv.IsLocalDaemon)
 	// Create a bridge network using custom ipam driver
 	dockerCmd(c, "network", "create", "--ipam-driver", dummyIPAMDriver, "br0")
 	assertNwIsAvailable(c, "br0")
@@ -647,7 +647,7 @@ func (s *DockerNetworkSuite) TestDockerNetworkCustomIPAM(c *check.C) {
 }
 
 func (s *DockerNetworkSuite) TestDockerNetworkIPAMOptions(c *check.C) {
-	testRequires(c, SameHostDaemon)
+	testRequires(c, testEnv.IsLocalDaemon)
 	// Create a bridge network using custom ipam driver and options
 	dockerCmd(c, "network", "create", "--ipam-driver", dummyIPAMDriver, "--ipam-opt", "opt1=drv1", "--ipam-opt", "opt2=drv2", "br0")
 	assertNwIsAvailable(c, "br0")
@@ -660,7 +660,7 @@ func (s *DockerNetworkSuite) TestDockerNetworkIPAMOptions(c *check.C) {
 }
 
 func (s *DockerNetworkSuite) TestDockerNetworkNullIPAMDriver(c *check.C) {
-	testRequires(c, SameHostDaemon)
+	testRequires(c, testEnv.IsLocalDaemon)
 	// Create a network with null ipam driver
 	_, _, err := dockerCmdWithError("network", "create", "-d", dummyNetworkDriver, "--ipam-driver", "null", "test000")
 	c.Assert(err, check.IsNil)
@@ -766,7 +766,7 @@ func (s *DockerNetworkSuite) TestDockerNetworkIPAMInvalidCombinations(c *check.C
 }
 
 func (s *DockerNetworkSuite) TestDockerNetworkDriverOptions(c *check.C) {
-	testRequires(c, SameHostDaemon)
+	testRequires(c, testEnv.IsLocalDaemon)
 	dockerCmd(c, "network", "create", "-d", dummyNetworkDriver, "-o", "opt1=drv1", "-o", "opt2=drv2", "testopt")
 	assertNwIsAvailable(c, "testopt")
 	gopts := remoteDriverNetworkRequest.Options[netlabel.GenericData]
@@ -847,11 +847,11 @@ func (s *DockerDaemonSuite) TestDockerNetworkNoDiscoveryDefaultBridgeNetwork(c *
 	// but discovery is on when connecting to non default bridge network
 	network := "anotherbridge"
 	out, err = s.d.Cmd("network", "create", network)
-	c.Assert(err, check.IsNil, check.Commentf(out))
+	c.Assert(err, check.IsNil, check.Commentf("%s", out))
 	defer s.d.Cmd("network", "rm", network)
 
 	out, err = s.d.Cmd("network", "connect", network, cid1)
-	c.Assert(err, check.IsNil, check.Commentf(out))
+	c.Assert(err, check.IsNil, check.Commentf("%s", out))
 
 	hosts, err = s.d.Cmd("exec", cid1, "cat", hostsFile)
 	c.Assert(err, checker.IsNil)
@@ -950,7 +950,7 @@ func (s *DockerNetworkSuite) TestDockerNetworkLinkOnDefaultNetworkOnly(c *check.
 }
 
 func (s *DockerNetworkSuite) TestDockerNetworkOverlayPortMapping(c *check.C) {
-	testRequires(c, SameHostDaemon)
+	testRequires(c, testEnv.IsLocalDaemon)
 	// Verify exposed ports are present in ps output when running a container on
 	// a network managed by a driver which does not provide the default gateway
 	// for the container
@@ -977,7 +977,7 @@ func (s *DockerNetworkSuite) TestDockerNetworkOverlayPortMapping(c *check.C) {
 }
 
 func (s *DockerNetworkSuite) TestDockerNetworkDriverUngracefulRestart(c *check.C) {
-	testRequires(c, DaemonIsLinux, NotUserNamespace, SameHostDaemon)
+	testRequires(c, DaemonIsLinux, NotUserNamespace, testEnv.IsLocalDaemon)
 	dnd := "dnd"
 	did := "did"
 
@@ -1018,7 +1018,7 @@ func (s *DockerNetworkSuite) TestDockerNetworkDriverUngracefulRestart(c *check.C
 }
 
 func (s *DockerNetworkSuite) TestDockerNetworkMacInspect(c *check.C) {
-	testRequires(c, SameHostDaemon)
+	testRequires(c, testEnv.IsLocalDaemon)
 	// Verify endpoint MAC address is correctly populated in container's network settings
 	nwn := "ov"
 	ctn := "bb"
@@ -1063,14 +1063,14 @@ func (s *DockerSuite) TestInspectAPIMultipleNetworks(c *check.C) {
 func connectContainerToNetworks(c *check.C, d *daemon.Daemon, cName string, nws []string) {
 	// Run a container on the default network
 	out, err := d.Cmd("run", "-d", "--name", cName, "busybox", "top")
-	c.Assert(err, checker.IsNil, check.Commentf(out))
+	c.Assert(err, checker.IsNil, check.Commentf("%s", out))
 
 	// Attach the container to other networks
 	for _, nw := range nws {
 		out, err = d.Cmd("network", "create", nw)
-		c.Assert(err, checker.IsNil, check.Commentf(out))
+		c.Assert(err, checker.IsNil, check.Commentf("%s", out))
 		out, err = d.Cmd("network", "connect", nw, cName)
-		c.Assert(err, checker.IsNil, check.Commentf(out))
+		c.Assert(err, checker.IsNil, check.Commentf("%s", out))
 	}
 }
 
@@ -1078,13 +1078,13 @@ func verifyContainerIsConnectedToNetworks(c *check.C, d *daemon.Daemon, cName st
 	// Verify container is connected to all the networks
 	for _, nw := range nws {
 		out, err := d.Cmd("inspect", "-f", fmt.Sprintf("{{.NetworkSettings.Networks.%s}}", nw), cName)
-		c.Assert(err, checker.IsNil, check.Commentf(out))
+		c.Assert(err, checker.IsNil, check.Commentf("%s", out))
 		c.Assert(out, checker.Not(checker.Equals), "<no value>\n")
 	}
 }
 
 func (s *DockerNetworkSuite) TestDockerNetworkMultipleNetworksGracefulDaemonRestart(c *check.C) {
-	testRequires(c, SameHostDaemon)
+	testRequires(c, testEnv.IsLocalDaemon)
 	cName := "bb"
 	nwList := []string{"nw1", "nw2", "nw3"}
 
@@ -1103,7 +1103,7 @@ func (s *DockerNetworkSuite) TestDockerNetworkMultipleNetworksGracefulDaemonRest
 }
 
 func (s *DockerNetworkSuite) TestDockerNetworkMultipleNetworksUngracefulDaemonRestart(c *check.C) {
-	testRequires(c, SameHostDaemon)
+	testRequires(c, testEnv.IsLocalDaemon)
 	cName := "cc"
 	nwList := []string{"nw1", "nw2", "nw3"}
 
@@ -1130,14 +1130,14 @@ func (s *DockerNetworkSuite) TestDockerNetworkRunNetByID(c *check.C) {
 }
 
 func (s *DockerNetworkSuite) TestDockerNetworkHostModeUngracefulDaemonRestart(c *check.C) {
-	testRequires(c, DaemonIsLinux, NotUserNamespace, SameHostDaemon)
+	testRequires(c, DaemonIsLinux, NotUserNamespace, testEnv.IsLocalDaemon)
 	s.d.StartWithBusybox(c)
 
 	// Run a few containers on host network
 	for i := 0; i < 10; i++ {
 		cName := fmt.Sprintf("hostc-%d", i)
 		out, err := s.d.Cmd("run", "-d", "--name", cName, "--net=host", "--restart=always", "busybox", "top")
-		c.Assert(err, checker.IsNil, check.Commentf(out))
+		c.Assert(err, checker.IsNil, check.Commentf("%s", out))
 
 		// verify container has finished starting before killing daemon
 		err = s.d.WaitRun(cName)
@@ -1160,7 +1160,7 @@ func (s *DockerNetworkSuite) TestDockerNetworkConnectToHostFromOtherNetwork(c *c
 	c.Assert(waitRun("container1"), check.IsNil)
 	dockerCmd(c, "network", "disconnect", "bridge", "container1")
 	out, _, err := dockerCmdWithError("network", "connect", "host", "container1")
-	c.Assert(err, checker.NotNil, check.Commentf(out))
+	c.Assert(err, checker.NotNil, check.Commentf("%s", out))
 	c.Assert(out, checker.Contains, runconfig.ErrConflictHostNetwork.Error())
 }
 
@@ -1256,7 +1256,7 @@ func (s *DockerNetworkSuite) TestDockerNetworkRestartWithMultipleNetworks(c *che
 }
 
 func (s *DockerNetworkSuite) TestDockerNetworkConnectDisconnectToStoppedContainer(c *check.C) {
-	testRequires(c, SameHostDaemon)
+	testRequires(c, testEnv.IsLocalDaemon)
 	dockerCmd(c, "network", "create", "test")
 	dockerCmd(c, "create", "--name=foo", "busybox", "top")
 	dockerCmd(c, "network", "connect", "test", "foo")
@@ -1785,7 +1785,7 @@ func (s *DockerNetworkSuite) TestDockerNetworkDisconnectFromBridge(c *check.C) {
 // TestConntrackFlowsLeak covers the failure scenario of ticket: https://github.com/docker/docker/issues/8795
 // Validates that conntrack is correctly cleaned once a container is destroyed
 func (s *DockerNetworkSuite) TestConntrackFlowsLeak(c *check.C) {
-	testRequires(c, IsAmd64, DaemonIsLinux, Network, SameHostDaemon)
+	testRequires(c, IsAmd64, DaemonIsLinux, Network, testEnv.IsLocalDaemon)
 
 	// Create a new network
 	cli.DockerCmd(c, "network", "create", "--subnet=192.168.10.0/24", "--gateway=192.168.10.1", "-o", "com.docker.network.bridge.host_binding_ipv4=192.168.10.1", "testbind")

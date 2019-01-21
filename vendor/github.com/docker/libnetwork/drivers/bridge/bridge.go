@@ -104,7 +104,7 @@ type containerConfiguration struct {
 	ChildEndpoints  []string
 }
 
-// cnnectivityConfiguration represents the user specified configuration regarding the external connectivity
+// connectivityConfiguration represents the user specified configuration regarding the external connectivity
 type connectivityConfiguration struct {
 	PortBindings []types.PortBinding
 	ExposedPorts []types.TransportPort
@@ -598,7 +598,7 @@ func (d *driver) checkConflict(config *networkConfiguration) error {
 		nwConfig := nw.config
 		nw.Unlock()
 		if err := nwConfig.Conflicts(config); err != nil {
-			if config.DefaultBridge {
+			if nwConfig.DefaultBridge {
 				// We encountered and identified a stale default network
 				// We must delete it as libnetwork is the source of truth
 				// The default network being created must be the only one

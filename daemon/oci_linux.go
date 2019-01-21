@@ -27,6 +27,10 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+const (
+	inContainerInitPath = "/sbin/" + daemonconfig.DefaultInitBinary
+)
+
 func setResources(s *specs.Spec, r containertypes.Resources) error {
 	weightDevices, err := getBlkioWeightDevices(r)
 	if err != nil {
@@ -109,7 +113,7 @@ func setDevices(s *specs.Spec, c *container.Container) error {
 		}
 
 		var err error
-		devPermissions, err = appendDevicePermissionsFromCgroupRules(devPermissions, c.HostConfig.DeviceCgroupRules)
+		devPermissions, err = oci.AppendDevicePermissionsFromCgroupRules(devPermissions, c.HostConfig.DeviceCgroupRules)
 		if err != nil {
 			return err
 		}
@@ -217,13 +221,13 @@ func setNamespaces(daemon *Daemon, s *specs.Spec, c *container.Container) error 
 	userNS := false
 	// user
 	if c.HostConfig.UsernsMode.IsPrivate() {
-		uidMap := daemon.idMappings.UIDs()
+		uidMap := daemon.idMapping.UIDs()
 		if uidMap != nil {
 			userNS = true
 			ns := specs.LinuxNamespace{Type: "user"}
 			setNamespace(s, ns)
 			s.Linux.UIDMappings = specMapping(uidMap)
-			s.Linux.GIDMappings = specMapping(daemon.idMappings.GIDs())
+			s.Linux.GIDMappings = specMapping(daemon.idMapping.GIDs())
 		}
 	}
 	// network
@@ -462,7 +466,7 @@ func setMounts(daemon *Daemon, s *specs.Spec, c *container.Container, mounts []c
 	}
 
 	// Copy all mounts from spec to defaultMounts, except for
-	//  - mounts overriden by a user supplied mount;
+	//  - mounts overridden by a user supplied mount;
 	//  - all mounts under /dev if a user supplied /dev is present;
 	//  - /dev/shm, in case IpcMode is none.
 	// While at it, also
@@ -494,12 +498,6 @@ func setMounts(daemon *Daemon, s *specs.Spec, c *container.Container, mounts []c
 
 	s.Mounts = defaultMounts
 	for _, m := range mounts {
-		for _, cm := range s.Mounts {
-			if cm.Destination == m.Destination {
-				return duplicateMountPointError(m.Destination)
-			}
-		}
-
 		if m.Source == "tmpfs" {
 			data := m.Data
 			parser := volumemounts.NewParser("linux")
@@ -539,7 +537,7 @@ func setMounts(daemon *Daemon, s *specs.Spec, c *container.Container, mounts []c
 		case mount.SLAVE, mount.RSLAVE:
 			var fallback bool
 			if err := ensureSharedOrSlave(m.Source); err != nil {
-				// For backwards compatability purposes, treat mounts from the daemon root
+				// For backwards compatibility purposes, treat mounts from the daemon root
 				// as special since we automatically add rslave propagation to these mounts
 				// when the user did not set anything, so we should fallback to the old
 				// behavior which is to use private propagation which is normally the
@@ -567,7 +565,11 @@ func setMounts(daemon *Daemon, s *specs.Spec, c *container.Container, mounts []c
 			}
 		}
 
-		opts := []string{"rbind"}
+		bindMode := "rbind"
+		if m.NonRecursive {
+			bindMode = "bind"
+		}
+		opts := []string{bindMode}
 		if !m.Writable {
 			opts = append(opts, "ro")
 		}
@@ -619,7 +621,7 @@ func setMounts(daemon *Daemon, s *specs.Spec, c *container.Container, mounts []c
 
 	// TODO: until a kernel/mount solution exists for handling remount in a user namespace,
 	// we must clear the readonly flag for the cgroups mount (@mrunalp concurs)
-	if uidMap := daemon.idMappings.UIDs(); uidMap != nil || c.HostConfig.Privileged {
+	if uidMap := daemon.idMapping.UIDs(); uidMap != nil || c.HostConfig.Privileged {
 		for i, m := range s.Mounts {
 			if m.Type == "cgroup" {
 				clearReadOnly(&s.Mounts[i])
@@ -642,7 +644,7 @@ func (daemon *Daemon) populateCommonSpec(s *specs.Spec, c *container.Container) 
 		Path:     c.BaseFS.Path(),
 		Readonly: c.HostConfig.ReadonlyRootfs,
 	}
-	if err := c.SetupWorkingDirectory(daemon.idMappings.RootPair()); err != nil {
+	if err := c.SetupWorkingDirectory(daemon.idMapping.RootPair()); err != nil {
 		return err
 	}
 	cwd := c.Config.WorkingDir
@@ -657,19 +659,16 @@ func (daemon *Daemon) populateCommonSpec(s *specs.Spec, c *container.Container) 
 	if c.HostConfig.PidMode.IsPrivate() {
 		if (c.HostConfig.Init != nil && *c.HostConfig.Init) ||
 			(c.HostConfig.Init == nil && daemon.configStore.Init) {
-			s.Process.Args = append([]string{"/dev/init", "--", c.Path}, c.Args...)
-			var path string
-			if daemon.configStore.InitPath == "" {
+			s.Process.Args = append([]string{inContainerInitPath, "--", c.Path}, c.Args...)
+			path := daemon.configStore.InitPath
+			if path == "" {
 				path, err = exec.LookPath(daemonconfig.DefaultInitBinary)
 				if err != nil {
 					return err
 				}
 			}
-			if daemon.configStore.InitPath != "" {
-				path = daemon.configStore.InitPath
-			}
 			s.Mounts = append(s.Mounts, specs.Mount{
-				Destination: "/dev/init",
+				Destination: inContainerInitPath,
 				Type:        "bind",
 				Source:      path,
 				Options:     []string{"bind", "ro"},
@@ -679,7 +678,15 @@ func (daemon *Daemon) populateCommonSpec(s *specs.Spec, c *container.Container) 
 	s.Process.Cwd = cwd
 	s.Process.Env = c.CreateDaemonEnvironment(c.Config.Tty, linkedEnv)
 	s.Process.Terminal = c.Config.Tty
-	s.Hostname = c.FullHostname()
+
+	s.Hostname = c.Config.Hostname
+	// There isn't a field in the OCI for the NIS domainname, but luckily there
+	// is a sysctl which has an identical effect to setdomainname(2) so there's
+	// no explicit need for runtime support.
+	s.Linux.Sysctl = make(map[string]string)
+	if c.Config.Domainname != "" {
+		s.Linux.Sysctl["kernel.domainname"] = c.Config.Domainname
+	}
 
 	return nil
 }
@@ -715,7 +722,11 @@ func (daemon *Daemon) createSpec(c *container.Container) (retSpec *specs.Spec, e
 	if err := setResources(&s, c.HostConfig.Resources); err != nil {
 		return nil, fmt.Errorf("linux runtime spec resources: %v", err)
 	}
-	s.Linux.Sysctl = c.HostConfig.Sysctls
+	// We merge the sysctls injected above with the HostConfig (latter takes
+	// precedence for backwards-compatibility reasons).
+	for k, v := range c.HostConfig.Sysctls {
+		s.Linux.Sysctl[k] = v
+	}
 
 	p := s.Linux.CgroupsPath
 	if useSystemd {
@@ -751,7 +762,7 @@ func (daemon *Daemon) createSpec(c *container.Container) (retSpec *specs.Spec, e
 	if err := setNamespaces(daemon, &s, c); err != nil {
 		return nil, fmt.Errorf("linux spec namespaces: %v", err)
 	}
-	if err := setCapabilities(&s, c); err != nil {
+	if err := oci.SetCapabilities(&s, c.HostConfig.CapAdd, c.HostConfig.CapDrop, c.HostConfig.Privileged); err != nil {
 		return nil, fmt.Errorf("linux spec capabilities: %v", err)
 	}
 	if err := setSeccomp(daemon, &s, c); err != nil {
@@ -808,7 +819,7 @@ func (daemon *Daemon) createSpec(c *container.Container) (retSpec *specs.Spec, e
 			s.Hooks = &specs.Hooks{
 				Prestart: []specs.Hook{{
 					Path: target,
-					Args: []string{"libnetwork-setkey", c.ID, daemon.netController.ID()},
+					Args: []string{"libnetwork-setkey", "-exec-root=" + daemon.configStore.GetExecRoot(), c.ID, daemon.netController.ID()},
 				}},
 			}
 		}

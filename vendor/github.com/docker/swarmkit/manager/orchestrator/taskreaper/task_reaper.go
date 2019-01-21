@@ -1,6 +1,7 @@
 package taskreaper
 
 import (
+	"context"
 	"sort"
 	"sync"
 	"time"
@@ -10,7 +11,6 @@ import (
 	"github.com/docker/swarmkit/manager/orchestrator"
 	"github.com/docker/swarmkit/manager/state"
 	"github.com/docker/swarmkit/manager/state/store"
-	"golang.org/x/net/context"
 )
 
 const (
@@ -31,7 +31,7 @@ type TaskReaper struct {
 	// taskHistory is the number of tasks to keep
 	taskHistory int64
 
-	// List of slot tubles to be inspected for task history cleanup.
+	// List of slot tuples to be inspected for task history cleanup.
 	dirty map[orchestrator.SlotTuple]struct{}
 
 	// List of tasks collected for cleanup, which includes two kinds of tasks
@@ -61,7 +61,7 @@ func New(store *store.MemoryStore) *TaskReaper {
 // Run is the TaskReaper's watch loop which collects candidates for cleanup.
 // Task history is mainly used in task restarts but is also available for administrative purposes.
 // Note that the task history is stored per-slot-per-service for replicated services
-// and per-node-per-service for global services. History does not apply to serviceless
+// and per-node-per-service for global services. History does not apply to serviceless tasks
 // since they are not attached to a service. In addition, the TaskReaper watch loop is also
 // responsible for cleaning up tasks associated with slots that were removed as part of
 // service scale down or service removal.
@@ -196,11 +196,9 @@ func (tr *TaskReaper) Run(ctx context.Context) {
 				}
 				isTimerStopped = true
 				tr.tick()
-			} else {
-				if isTimerStopped {
-					timer.Reset(reaperBatchingInterval)
-					isTimerStopped = false
-				}
+			} else if isTimerStopped {
+				timer.Reset(reaperBatchingInterval)
+				isTimerStopped = false
 			}
 		case <-timer.C:
 			// we can safely ignore draining off of the timer channel, because
@@ -218,6 +216,16 @@ func (tr *TaskReaper) Run(ctx context.Context) {
 			return
 		}
 	}
+}
+
+// taskInTerminalState returns true if task is in a terminal state.
+func taskInTerminalState(task *api.Task) bool {
+	return task.Status.State > api.TaskStateRunning
+}
+
+// taskWillNeverRun returns true if task will never reach running state.
+func taskWillNeverRun(task *api.Task) bool {
+	return task.Status.State < api.TaskStateAssigned && task.DesiredState > api.TaskStateRunning
 }
 
 // tick performs task history cleanup.
@@ -329,22 +337,20 @@ func (tr *TaskReaper) tick() {
 
 			runningTasks := 0
 			for _, t := range historicTasks {
-				// Skip tasks which are desired to be running but the current state
-				// is less than or equal to running.
-				// This check is important to ignore tasks which are running or need to be running,
-				// but to delete tasks which are either past running,
-				// or have not reached running but need to be shutdown (because of a service update, for example).
-				if t.DesiredState == api.TaskStateRunning && t.Status.State <= api.TaskStateRunning {
-					// Don't delete running tasks
+				// Historical tasks can be considered for cleanup if:
+				// 1. The task has reached a terminal state i.e. actual state beyond TaskStateRunning.
+				// 2. The task has not yet become running and desired state is a terminal state i.e.
+				// actual state not yet TaskStateAssigned and desired state beyond TaskStateRunning.
+				if taskInTerminalState(t) || taskWillNeverRun(t) {
+					deleteTasks[t.ID] = struct{}{}
+
+					taskHistory++
+					if int64(len(historicTasks)) <= taskHistory {
+						break
+					}
+				} else {
+					// all other tasks are counted as running.
 					runningTasks++
-					continue
-				}
-
-				deleteTasks[t.ID] = struct{}{}
-
-				taskHistory++
-				if int64(len(historicTasks)) <= taskHistory {
-					break
 				}
 			}
 

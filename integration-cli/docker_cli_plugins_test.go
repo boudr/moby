@@ -440,7 +440,7 @@ enabled: false`, id, name)
 }
 
 func (s *DockerSuite) TestPluginUpgrade(c *check.C) {
-	testRequires(c, DaemonIsLinux, Network, SameHostDaemon, IsAmd64, NotUserNamespace)
+	testRequires(c, DaemonIsLinux, Network, testEnv.IsLocalDaemon, IsAmd64, NotUserNamespace)
 	plugin := "cpuguy83/docker-volume-driver-plugin-local:latest"
 	pluginV2 := "cpuguy83/docker-volume-driver-plugin-local:v2"
 
@@ -449,7 +449,7 @@ func (s *DockerSuite) TestPluginUpgrade(c *check.C) {
 	dockerCmd(c, "run", "--rm", "-v", "bananas:/apple", "busybox", "sh", "-c", "touch /apple/core")
 
 	out, _, err := dockerCmdWithError("plugin", "upgrade", "--grant-all-permissions", plugin, pluginV2)
-	c.Assert(err, checker.NotNil, check.Commentf(out))
+	c.Assert(err, checker.NotNil, check.Commentf("%s", out))
 	c.Assert(out, checker.Contains, "disabled before upgrading")
 
 	out, _ = dockerCmd(c, "plugin", "inspect", "--format={{.ID}}", plugin)
@@ -457,7 +457,7 @@ func (s *DockerSuite) TestPluginUpgrade(c *check.C) {
 
 	// make sure "v2" does not exists
 	_, err = os.Stat(filepath.Join(testEnv.DaemonInfo.DockerRootDir, "plugins", id, "rootfs", "v2"))
-	c.Assert(os.IsNotExist(err), checker.True, check.Commentf(out))
+	c.Assert(os.IsNotExist(err), checker.True, check.Commentf("%s", out))
 
 	dockerCmd(c, "plugin", "disable", "-f", plugin)
 	dockerCmd(c, "plugin", "upgrade", "--grant-all-permissions", "--skip-remote-check", plugin, pluginV2)
@@ -472,7 +472,7 @@ func (s *DockerSuite) TestPluginUpgrade(c *check.C) {
 }
 
 func (s *DockerSuite) TestPluginMetricsCollector(c *check.C) {
-	testRequires(c, DaemonIsLinux, Network, SameHostDaemon, IsAmd64)
+	testRequires(c, DaemonIsLinux, Network, testEnv.IsLocalDaemon, IsAmd64)
 	d := daemon.New(c, dockerBinary, dockerdBinary)
 	d.Start(c)
 	defer d.Stop(c)
